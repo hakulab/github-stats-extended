@@ -179,6 +179,7 @@ describe("Cloudflare Workers fetch adapter", () => {
   it("returns 404 for non-card backend routes and protocol-relative paths", async () => {
     for (const url of [
       "https://stats.example.com/api/status/pat-info",
+      "https://stats.example.com/api/status/up",
       "https://stats.example.com/api/wakatime-proxy",
       "https://stats.example.com/api/repeat-recent",
       "https://stats.example.com/api/authenticate",
@@ -192,6 +193,41 @@ describe("Cloudflare Workers fetch adapter", () => {
       expect(response.status).toBe(404);
       expect(await response.text()).toBe("Not Found");
     }
+  });
+
+  it("rejects non-GET/HEAD methods with 405 Method Not Allowed", async () => {
+    for (const method of ["POST", "PUT", "DELETE", "PATCH", "OPTIONS"]) {
+      const response = await worker.fetch(
+        new Request("https://stats.example.com/api?username=alice", { method }),
+        {},
+      );
+      expect(response.status).toBe(405);
+      expect(response.headers.get("Allow")).toBe("GET, HEAD");
+      expect(await response.text()).toBe("Method Not Allowed");
+    }
+    expect(loadConfigFromEnvMock).not.toHaveBeenCalled();
+    expect(apiMock).not.toHaveBeenCalled();
+  });
+
+  it("passes GET to router on HEAD cache miss and returns an empty body", async () => {
+    apiMock.mockResolvedValue({
+      status: "success",
+      content: "<svg>stats</svg>",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://stats.example.com/api?username=alice", {
+        method: "HEAD",
+      }),
+      {},
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(await response.text()).toBe("");
+    expect(storeRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("normalizes repeated repo_owners and repo-owners query params for routing and caching", async () => {
@@ -346,5 +382,112 @@ describe("Cloudflare Workers fetch adapter", () => {
       "render-error:This username is not whitelisted",
     );
     expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bypasses edge cache reads and writes for disallowed users", async () => {
+    const store = new Map();
+    const match = vi.fn(async (req) => store.get(req.url)?.clone());
+    const put = vi.fn(async (req, res) => {
+      store.set(req.url, res.clone());
+    });
+    Object.defineProperty(globalThis, "caches", {
+      value: { default: { match, put } },
+      configurable: true,
+    });
+
+    getConfigMock.mockReturnValue({
+      whitelist: ["alice"],
+      defaultRepoOwners: [],
+    });
+    apiMock.mockResolvedValue({
+      status: "success",
+      content: "<svg>alice-stats</svg>",
+    });
+
+    const initial = await worker.fetch(
+      new Request("https://stats.example.com/api?username=alice"),
+      {},
+    );
+    expect(await initial.text()).toBe("<svg>alice-stats</svg>");
+    expect(put).toHaveBeenCalledTimes(1);
+
+    getConfigMock.mockReturnValue({
+      whitelist: ["bob"],
+      defaultRepoOwners: [],
+    });
+    match.mockClear();
+    put.mockClear();
+
+    const revoked = await worker.fetch(
+      new Request("https://stats.example.com/api?username=alice"),
+      {},
+    );
+    expect(revoked.status).toBe(200);
+    expect(await revoked.text()).toBe(
+      "render-error:This username is not whitelisted",
+    );
+    expect(match).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("scopes repo_owners canonicalization to /api and /api/top-langs and normalizes gist id", async () => {
+    const store = new Map();
+    const match = vi.fn(async (req) => store.get(req.url)?.clone());
+    const put = vi.fn(async (req, res) => {
+      store.set(req.url, res.clone());
+    });
+    Object.defineProperty(globalThis, "caches", {
+      value: { default: { match, put } },
+      configurable: true,
+    });
+
+    getConfigMock.mockReturnValue({ defaultRepoOwners: ["org-a"] });
+    pinMock.mockResolvedValue({ status: "success", content: "<svg>pin</svg>" });
+    gistMock.mockResolvedValue({
+      status: "success",
+      content: "<svg>gist</svg>",
+    });
+
+    await worker.fetch(
+      new Request(
+        "https://stats.example.com/api/pin?username=Alice&repo=demo&theme=light&theme=dark",
+      ),
+      {},
+    );
+    expect(put).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        url: "https://stats.example.com/api/pin?repo=demo&theme=dark&username=alice",
+      }),
+      expect.any(Response),
+    );
+    expect(storeRequestMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        url: "/api/pin?username=Alice&repo=demo&theme=dark",
+      }),
+    );
+
+    await worker.fetch(
+      new Request("https://stats.example.com/api/gist?id=%20AbC123%20"),
+      {},
+    );
+    expect(put).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        url: "https://stats.example.com/api/gist?id=abc123",
+      }),
+      expect.any(Response),
+    );
+  });
+
+  it("matches blacklist case-insensitively", async () => {
+    const response = await worker.fetch(
+      new Request("https://stats.example.com/api?username=Renovate-Bot"),
+      {},
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(
+      "render-error:This username is blacklisted",
+    );
+    expect(apiMock).not.toHaveBeenCalled();
   });
 });

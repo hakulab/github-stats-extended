@@ -8,12 +8,10 @@ import axios from "axios";
 import router from "../router.js";
 import type { RouterRequest, RouterResponse } from "../router.js";
 
-/**
- * Env vars read by backend modules through `process.env` at request time.
- * `loadConfigFromEnv(env)` covers core's config (`WHITELIST`, `GIST_WHITELIST`,
- * `EXCLUDE_REPO`, `DEFAULT_REPO_OWNERS`, `REPO_OWNERS`, `FETCH_MULTI_PAGE_STARS`,
- * `PAT_*`). `CACHE_SECONDS` is read directly by backend cache helpers.
- */
+import { guardAccess } from "./common/access.js";
+
+// Core config reads env via `loadConfigFromEnv(env)`, while `CACHE_SECONDS` is
+// read directly from `process.env` by backend cache helpers.
 const BRIDGED_PROCESS_ENV_KEYS = ["CACHE_SECONDS"];
 
 const CARD_ROUTES = new Set([
@@ -24,6 +22,8 @@ const CARD_ROUTES = new Set([
   "/api/wakatime",
 ]);
 
+const REPO_OWNER_ROUTES = new Set(["/api", "/api/top-langs"]);
+
 interface WorkerExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -33,24 +33,12 @@ interface WorkerCache {
   put(request: Request, response: Response): Promise<void>;
 }
 
-/**
- * Returns Cloudflare's default edge cache when available in the runtime.
- *
- * @returns Default `Cache` instance or `undefined` outside Workers.
- */
 function getDefaultCache(): WorkerCache | undefined {
   const cachesObj = (globalThis as { caches?: { default?: WorkerCache } })
     .caches;
   return cachesObj?.default;
 }
 
-/**
- * Normalizes a Workers `env` binding map to string values suitable for
- * `loadConfigFromEnv` and `process.env`.
- *
- * @param env Cloudflare Workers environment bindings.
- * @returns String-only environment map.
- */
 function extractStringEnv(
   env: Record<string, unknown>,
 ): Record<string, string | undefined> {
@@ -63,11 +51,6 @@ function extractStringEnv(
   return stringEnv;
 }
 
-/**
- * Applies per-request Workers bindings to core config and bridged `process.env` keys.
- *
- * @param env Cloudflare Workers environment bindings.
- */
 function applyWorkerEnv(env: Record<string, unknown>): void {
   const stringEnv = extractStringEnv(env);
   loadConfigFromEnv(stringEnv);
@@ -82,14 +65,6 @@ function applyWorkerEnv(env: Record<string, unknown>): void {
   }
 }
 
-/**
- * Normalizes a Node-style response payload into a Web `BodyInit` value and
- * sets a default `Content-Type` when Express's `res.send` would have done so.
- *
- * @param payload Body passed to `res.send` or `res.end`.
- * @param headers Response headers map to inspect/update.
- * @returns Normalized response body.
- */
 function normalizeBody(
   payload: unknown,
   headers: Headers,
@@ -109,16 +84,6 @@ function normalizeBody(
   return JSON.stringify(payload);
 }
 
-/**
- * Builds a canonical `GET` cache key URL with sorted query parameters,
- * lowercased `username`, and canonicalized, alphabetically sorted `repo_owners`.
- *
- * @param origin Request origin.
- * @param pathname Normalized card route pathname.
- * @param searchParams Incoming query parameters.
- * @param defaultRepoOwners Default extra owners from config.
- * @returns Canonical query map, router search string, and edge cache key `Request`.
- */
 function canonicalizeRequest(
   origin: string,
   pathname: string,
@@ -130,51 +95,50 @@ function canonicalizeRequest(
   cacheKey: Request;
 } {
   const query = Object.fromEntries(searchParams.entries());
-  const rawRepoOwnerValues = [
-    ...searchParams.getAll("repo_owners"),
-    ...searchParams.getAll("repo-owners"),
-  ];
-  const hasExplicitRepoOwners = rawRepoOwnerValues.length > 0;
+  const supportsRepoOwners = REPO_OWNER_ROUTES.has(pathname);
 
-  const routerParams = new URLSearchParams(searchParams);
-  routerParams.delete("repo-owners");
-
-  let canonicalOwners: Array<string>;
-  if (hasExplicitRepoOwners) {
-    const splitOwners = rawRepoOwnerValues.flatMap((value) => value.split(","));
-    const normalizedOwners = normalizeRepoOwners(
-      splitOwners,
-      query["username"],
-    );
-    const normalizedValue = normalizedOwners
-      .map((owner) => owner.toLowerCase())
-      .join(",");
-    routerParams.set("repo_owners", normalizedValue);
-    query["repo_owners"] = normalizedValue;
+  let canonicalOwners: Array<string> = [];
+  if (supportsRepoOwners) {
+    const rawRepoOwnerValues = [
+      ...searchParams.getAll("repo_owners"),
+      ...searchParams.getAll("repo-owners"),
+    ];
     delete query["repo-owners"];
-    canonicalOwners = normalizedOwners
-      .map((owner) => owner.toLowerCase())
-      .sort();
-  } else {
-    canonicalOwners = normalizeRepoOwners(defaultRepoOwners, query["username"])
-      .map((owner) => owner.toLowerCase())
-      .sort();
+
+    if (rawRepoOwnerValues.length > 0) {
+      const splitOwners = rawRepoOwnerValues.flatMap((value) =>
+        value.split(","),
+      );
+      const lowerOwners = normalizeRepoOwners(
+        splitOwners,
+        query["username"],
+      ).map((owner) => owner.toLowerCase());
+      query["repo_owners"] = lowerOwners.join(",");
+      canonicalOwners = [...lowerOwners].sort();
+    } else {
+      canonicalOwners = normalizeRepoOwners(
+        defaultRepoOwners,
+        query["username"],
+      )
+        .map((owner) => owner.toLowerCase())
+        .sort();
+    }
   }
 
+  const routerParams = new URLSearchParams();
   const cacheParams = new URLSearchParams();
-  const sortedEntries = [...routerParams.entries()].sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  for (const [key, value] of sortedEntries) {
-    if (key === "repo_owners") {
+  for (const [key, value] of Object.entries(query)) {
+    routerParams.set(key, value);
+    if (supportsRepoOwners && key === "repo_owners") {
       continue;
     }
-    cacheParams.append(
-      key,
-      key === "username" ? value.trim().toLowerCase() : value,
-    );
+    const normalizedValue =
+      key === "username" || (pathname === "/api/gist" && key === "id")
+        ? value.trim().toLowerCase()
+        : value;
+    cacheParams.set(key, normalizedValue);
   }
-  if (canonicalOwners.length > 0) {
+  if (supportsRepoOwners && canonicalOwners.length > 0) {
     cacheParams.set("repo_owners", canonicalOwners.join(","));
   }
   cacheParams.sort();
@@ -190,12 +154,20 @@ function canonicalizeRequest(
   };
 }
 
-/**
- * Checks whether a response is eligible for Cloudflare edge caching.
- *
- * @param response Candidate response.
- * @returns True if the response is a cacheable 200 SVG.
- */
+function isRequestAllowed(
+  pathname: string,
+  query: Record<string, string>,
+): boolean {
+  const type =
+    pathname === "/api/gist"
+      ? "gist"
+      : pathname === "/api/wakatime"
+        ? "wakatime"
+        : "username";
+  const id = type === "gist" ? (query["id"] ?? "") : (query["username"] ?? "");
+  return guardAccess({ id, type, colors: {} }).isPassed;
+}
+
 function isCacheableSvgResponse(response: Response): boolean {
   if (response.status !== 200) {
     return false;
@@ -217,22 +189,13 @@ function isCacheableSvgResponse(response: Response): boolean {
   return true;
 }
 
-/**
- * Handles a Cloudflare Workers `fetch` event by bridging the Web `Request`
- * to the backend Node-style `router(req, res)` and returning a Web `Response`.
- *
- * @param request Incoming Fetch API request.
- * @param env Cloudflare Workers environment bindings.
- * @param ctx Optional Workers execution context for background cache writes.
- * @returns Web `Response` produced by the backend router or edge cache.
- */
 export async function handleWorkerRequest(
   request: Request,
   env: Record<string, unknown> = {},
   ctx?: WorkerExecutionContext,
 ): Promise<Response> {
-  // Cloudflare Workers supports `fetch` natively, so force axios onto its fetch
-  // adapter so it does not attempt to use Node's `http` adapter under `nodejs_compat`.
+  // Force axios onto its fetch adapter so it does not attempt to use Node's
+  // `http` adapter under `nodejs_compat`.
   axios.defaults.adapter = "fetch";
 
   const url = new URL(request.url);
@@ -249,10 +212,15 @@ export async function handleWorkerRequest(
     return new Response("Not Found", { status: 404 });
   }
 
-  applyWorkerEnv(env);
-
   const method = request.method.toUpperCase();
-  const isCacheableMethod = method === "GET" || method === "HEAD";
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "GET, HEAD" },
+    });
+  }
+
+  applyWorkerEnv(env);
 
   const { query, routerSearch, cacheKey } = canonicalizeRequest(
     url.origin,
@@ -261,7 +229,10 @@ export async function handleWorkerRequest(
     getConfig().defaultRepoOwners,
   );
 
-  const cache = isCacheableMethod ? getDefaultCache() : undefined;
+  // Check access before consulting or populating the edge cache so revoked
+  // users cannot hit stale entries and denial SVGs are never cached.
+  const canUseCache = isRequestAllowed(pathname, query);
+  const cache = canUseCache ? getDefaultCache() : undefined;
   if (cache) {
     const cached = await cache.match(cacheKey);
     if (cached) {
@@ -277,7 +248,7 @@ export async function handleWorkerRequest(
   }
 
   const req: RouterRequest = {
-    method: request.method,
+    method: "GET",
     url: `${pathname}${routerSearch}`,
     headers: Object.fromEntries(request.headers.entries()),
     query,

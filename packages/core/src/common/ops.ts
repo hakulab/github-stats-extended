@@ -148,19 +148,8 @@ const buildSearchFilter = (
   return repoFilter + orgFilter;
 };
 
-/**
- * Maximum number of additional repository owners aggregated alongside the primary user.
- */
 const MAX_ADDITIONAL_REPO_OWNERS = 10;
 
-/**
- * Normalize, trim, deduplicate case-insensitively, and cap repository owner logins,
- * optionally excluding a primary username that is already fetched.
- *
- * @param owners Raw owner login list.
- * @param primaryUsername Optional primary username to omit from extra owners.
- * @returns Deduplicated, trimmed owner logins preserving first-seen order, capped at `MAX_ADDITIONAL_REPO_OWNERS`.
- */
 const normalizeRepoOwners = (
   owners: Array<string>,
   primaryUsername?: string,
@@ -190,15 +179,6 @@ const normalizeRepoOwners = (
   return normalized;
 };
 
-/**
- * Resolve effective extra repository owners from explicit param values or
- * `DEFAULT_REPO_OWNERS` / `REPO_OWNERS` env config, normalized and deduplicated.
- *
- * @param explicitOwners Explicit owner logins passed via query/argument, or `undefined` to use env default.
- * @param defaultOwners Default owner logins from runtime config.
- * @param primaryUsername Primary username already queried.
- * @returns Normalized extra owner logins.
- */
 const resolveRepoOwners = (
   explicitOwners: Array<string> | undefined,
   defaultOwners: Array<string>,
@@ -208,17 +188,6 @@ const resolveRepoOwners = (
   return normalizeRepoOwners(source, primaryUsername);
 };
 
-/**
- * Check whether a repository matches an exclusion set by either short `name`
- * or full `nameWithOwner` (case-insensitive when `excludedLower` is supplied).
- *
- * @param repo Repository to check.
- * @param repo.name Short repository name.
- * @param repo.nameWithOwner Optional `owner/repo` full name.
- * @param excluded Exact repo names and `owner/repo` entries to exclude.
- * @param excludedLower Optional lowercased exclusion set for case-insensitive matching.
- * @returns True if the repository should be excluded.
- */
 const isRepoExcluded = (
   repo: { name: string; nameWithOwner?: string | null },
   excluded: ReadonlySet<string>,
@@ -238,13 +207,7 @@ const isRepoExcluded = (
   return false;
 };
 
-/**
- * Deduplicate repositories by `nameWithOwner` (case-insensitive), falling back
- * to `name` when `nameWithOwner` is absent in legacy fixtures.
- *
- * @param repos Repository nodes to deduplicate.
- * @returns Deduplicated repository nodes preserving first-seen order.
- */
+// Falls back to short name when legacy fixtures omit nameWithOwner.
 const deduplicateRepoNodes = <
   T extends { name: string; nameWithOwner?: string | null },
 >(
