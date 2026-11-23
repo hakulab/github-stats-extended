@@ -24,8 +24,6 @@ jobs:
 
       - name: Set up Nix
         uses: hakulab/devkit/.github/actions/setup-nix@v3
-        with:
-          cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: nix develop -c pnpm install --frozen-lockfile

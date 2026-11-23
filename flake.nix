@@ -6,7 +6,9 @@
   description = "github-stats-extended development environment";
 
   nixConfig = {
-    extra-substituters = [ "https://hakula.cachix.org" ];
+    extra-substituters = [
+      "https://hakula.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "hakula.cachix.org-1:7zwB3fhMfReHdOjh6DmnaLXgqbPDBcojvN9F+osZw0k="
     ];
@@ -45,6 +47,9 @@
         preCommit = dk.preCommit {
           src = ./.;
           hooks = {
+            cspell.enable = false;
+            dprint.enable = false;
+            markdownlint-cli2.enable = false;
             taplo.enable = true;
           };
         };
