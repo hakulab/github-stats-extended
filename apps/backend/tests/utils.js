@@ -312,25 +312,6 @@ export function mockCore() {
     getConfig: vi.fn().mockReturnValue({}),
     renderError: ({ message }) => `render-error:${message}`,
     clampValue: (value, min, max) => Math.min(Math.max(value, min), max),
-    normalizeRepoOwners: (owners, primaryUsername) => {
-      const seen = new Set(
-        primaryUsername ? [primaryUsername.toLowerCase().trim()] : [],
-      );
-      const out = [];
-      for (const raw of owners) {
-        const trimmed = raw.trim();
-        if (!trimmed) {
-          continue;
-        }
-        const lower = trimmed.toLowerCase();
-        if (seen.has(lower)) {
-          continue;
-        }
-        seen.add(lower);
-        out.push(trimmed);
-      }
-      return out;
-    },
     logger: {
       log: vi.fn(),
       error: vi.fn(),

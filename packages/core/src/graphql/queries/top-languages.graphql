@@ -21,6 +21,7 @@ query topLanguages(
   $ownerAffiliations: [RepositoryAffiliation]
 ) {
   user(login: $login) {
+    login
     # do not fetch forks
     repositories(
       ownerAffiliations: $ownerAffiliations

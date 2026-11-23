@@ -1,31 +1,44 @@
 import {
+  getConfig,
   loadConfigFromEnv,
   normalizeRepoOwners,
 } from "@stats-organization/github-readme-stats-core";
 import axios from "axios";
 
 import router from "../router.js";
+import type { RouterRequest, RouterResponse } from "../router.js";
 
-/**
- * Env vars read by backend modules through `process.env` at request time.
- * `loadConfigFromEnv(env)` covers core's config (`WHITELIST`, `GIST_WHITELIST`,
- * `EXCLUDE_REPO`, `DEFAULT_REPO_OWNERS`, `REPO_OWNERS`, `FETCH_MULTI_PAGE_STARS`,
- * `PAT_*`). These are read directly by backend cache and OAuth handlers.
- */
-const BRIDGED_PROCESS_ENV_KEYS = [
-  "CACHE_SECONDS",
-  "OAUTH_CLIENT_ID",
-  "OAUTH_CLIENT_SECRET",
-  "OAUTH_REDIRECT_URI",
-];
+import { guardAccess } from "./common/access.js";
 
-/**
- * Normalizes a Workers `env` binding map to string values suitable for
- * `loadConfigFromEnv` and `process.env`.
- *
- * @param env Cloudflare Workers environment bindings.
- * @returns String-only environment map.
- */
+// Core config reads env via `loadConfigFromEnv(env)`, while `CACHE_SECONDS` is
+// read directly from `process.env` by backend cache helpers.
+const BRIDGED_PROCESS_ENV_KEYS = ["CACHE_SECONDS"];
+
+const CARD_ROUTES = new Set([
+  "/api",
+  "/api/top-langs",
+  "/api/pin",
+  "/api/gist",
+  "/api/wakatime",
+]);
+
+const REPO_OWNER_ROUTES = new Set(["/api", "/api/top-langs"]);
+
+interface WorkerExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+interface WorkerCache {
+  match(request: Request): Promise<Response | undefined>;
+  put(request: Request, response: Response): Promise<void>;
+}
+
+function getDefaultCache(): WorkerCache | undefined {
+  const cachesObj = (globalThis as { caches?: { default?: WorkerCache } })
+    .caches;
+  return cachesObj?.default;
+}
+
 function extractStringEnv(
   env: Record<string, unknown>,
 ): Record<string, string | undefined> {
@@ -38,11 +51,6 @@ function extractStringEnv(
   return stringEnv;
 }
 
-/**
- * Applies per-request Workers bindings to core config and bridged `process.env` keys.
- *
- * @param env Cloudflare Workers environment bindings.
- */
 function applyWorkerEnv(env: Record<string, unknown>): void {
   const stringEnv = extractStringEnv(env);
   loadConfigFromEnv(stringEnv);
@@ -57,14 +65,6 @@ function applyWorkerEnv(env: Record<string, unknown>): void {
   }
 }
 
-/**
- * Normalizes a Node-style response payload into a Web `BodyInit` value and
- * sets a default `Content-Type` when Express's `res.send` would have done so.
- *
- * @param payload Body passed to `res.send` or `res.end`.
- * @param headers Response headers map to inspect/update.
- * @returns Normalized response body.
- */
 function normalizeBody(
   payload: unknown,
   headers: Headers,
@@ -84,68 +84,172 @@ function normalizeBody(
   return JSON.stringify(payload);
 }
 
-interface RouterRequest {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
+function canonicalizeRequest(
+  origin: string,
+  pathname: string,
+  searchParams: URLSearchParams,
+  defaultRepoOwners: Array<string>,
+): {
   query: Record<string, string>;
+  routerSearch: string;
+  cacheKey: Request;
+} {
+  const query = Object.fromEntries(searchParams.entries());
+  const supportsRepoOwners = REPO_OWNER_ROUTES.has(pathname);
+
+  let canonicalOwners: Array<string> = [];
+  if (supportsRepoOwners) {
+    const rawRepoOwnerValues = [
+      ...searchParams.getAll("repo_owners"),
+      ...searchParams.getAll("repo-owners"),
+    ];
+    delete query["repo-owners"];
+
+    if (rawRepoOwnerValues.length > 0) {
+      const splitOwners = rawRepoOwnerValues.flatMap((value) =>
+        value.split(","),
+      );
+      const lowerOwners = normalizeRepoOwners(
+        splitOwners,
+        query["username"],
+      ).map((owner) => owner.toLowerCase());
+      query["repo_owners"] = lowerOwners.join(",");
+      canonicalOwners = [...lowerOwners].sort();
+    } else {
+      canonicalOwners = normalizeRepoOwners(
+        defaultRepoOwners,
+        query["username"],
+      )
+        .map((owner) => owner.toLowerCase())
+        .sort();
+    }
+  }
+
+  const routerParams = new URLSearchParams();
+  const cacheParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    routerParams.set(key, value);
+    if (supportsRepoOwners && key === "repo_owners") {
+      continue;
+    }
+    const normalizedValue =
+      key === "username" || (pathname === "/api/gist" && key === "id")
+        ? value.trim().toLowerCase()
+        : value;
+    cacheParams.set(key, normalizedValue);
+  }
+  if (supportsRepoOwners && canonicalOwners.length > 0) {
+    cacheParams.set("repo_owners", canonicalOwners.join(","));
+  }
+  cacheParams.sort();
+
+  const routerSearch = routerParams.toString();
+  const cacheSearch = cacheParams.toString();
+  const cacheUrl = `${origin}${pathname}${cacheSearch ? `?${cacheSearch}` : ""}`;
+
+  return {
+    query,
+    routerSearch: routerSearch ? `?${routerSearch}` : "",
+    cacheKey: new Request(cacheUrl, { method: "GET" }),
+  };
 }
 
-interface RouterResponse {
-  statusCode: number;
-  setHeader(name: string, value: string | number | Array<string>): void;
-  getHeader(name: string): string | null;
-  status(code: number): RouterResponse;
-  send(payload?: unknown): void;
-  end(payload?: unknown): void;
+function isRequestAllowed(
+  pathname: string,
+  query: Record<string, string>,
+): boolean {
+  const type =
+    pathname === "/api/gist"
+      ? "gist"
+      : pathname === "/api/wakatime"
+        ? "wakatime"
+        : "username";
+  const id = type === "gist" ? (query["id"] ?? "") : (query["username"] ?? "");
+  return guardAccess({ id, type, colors: {} }).isPassed;
 }
 
-/**
- * Handles a Cloudflare Workers `fetch` event by bridging the Web `Request`
- * to the backend Node-style `router(req, res)` and returning a Web `Response`.
- *
- * @param request Incoming Fetch API request.
- * @param env Cloudflare Workers environment bindings.
- * @returns Web `Response` produced by the backend router.
- */
+function isCacheableSvgResponse(response: Response): boolean {
+  if (response.status !== 200) {
+    return false;
+  }
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.toLowerCase().startsWith("image/svg+xml")) {
+    return false;
+  }
+  const cacheControl = (
+    response.headers.get("Cache-Control") ?? ""
+  ).toLowerCase();
+  if (
+    cacheControl.includes("no-store") ||
+    cacheControl.includes("no-cache") ||
+    cacheControl.includes("private")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function handleWorkerRequest(
   request: Request,
   env: Record<string, unknown> = {},
+  ctx?: WorkerExecutionContext,
 ): Promise<Response> {
-  // Cloudflare Workers supports `fetch` natively, so force axios onto its fetch
-  // adapter so it does not attempt to use Node's `http` adapter under `nodejs_compat`.
+  // Force axios onto its fetch adapter so it does not attempt to use Node's
+  // `http` adapter under `nodejs_compat`.
   axios.defaults.adapter = "fetch";
 
-  applyWorkerEnv(env);
-
   const url = new URL(request.url);
+  if (url.pathname.startsWith("//")) {
+    return new Response("Not Found", { status: 404 });
+  }
+
   let pathname = url.pathname;
   if (pathname !== "/" && pathname.endsWith("/")) {
     pathname = pathname.slice(0, -1);
   }
 
-  const query = Object.fromEntries(url.searchParams.entries());
-  const rawRepoOwners = query["repo_owners"] ?? query["repo-owners"];
-  let canonicalSearch = url.search;
-  if (rawRepoOwners !== undefined) {
-    const normalizedOwners = normalizeRepoOwners(
-      rawRepoOwners.split(","),
-      query["username"],
-    );
-    const normalizedValue = normalizedOwners
-      .map((owner) => owner.toLowerCase())
-      .join(",");
-    const canonicalParams = new URLSearchParams(url.searchParams);
-    canonicalParams.delete("repo-owners");
-    canonicalParams.set("repo_owners", normalizedValue);
-    canonicalSearch = `?${canonicalParams.toString()}`;
-    query["repo_owners"] = normalizedValue;
-    delete query["repo-owners"];
+  if (!CARD_ROUTES.has(pathname)) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: { Allow: "GET, HEAD" },
+    });
+  }
+
+  applyWorkerEnv(env);
+
+  const { query, routerSearch, cacheKey } = canonicalizeRequest(
+    url.origin,
+    pathname,
+    url.searchParams,
+    getConfig().defaultRepoOwners,
+  );
+
+  // Check access before consulting or populating the edge cache so revoked
+  // users cannot hit stale entries and denial SVGs are never cached.
+  const canUseCache = isRequestAllowed(pathname, query);
+  const cache = canUseCache ? getDefaultCache() : undefined;
+  if (cache) {
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      if (method === "HEAD") {
+        return new Response(null, {
+          status: cached.status,
+          statusText: cached.statusText,
+          headers: cached.headers,
+        });
+      }
+      return cached;
+    }
   }
 
   const req: RouterRequest = {
-    method: request.method,
-    url: `${pathname}${canonicalSearch}`,
+    method: "GET",
+    url: `${pathname}${routerSearch}`,
     headers: Object.fromEntries(request.headers.entries()),
     query,
   };
@@ -193,12 +297,37 @@ export async function handleWorkerRequest(
 
   await router(req, res);
 
-  return new Response(body, {
+  const response = new Response(body, {
     status: res.statusCode,
     headers,
   });
+
+  if (cache && isCacheableSvgResponse(response)) {
+    const putPromise = cache.put(cacheKey, response.clone());
+    if (ctx) {
+      ctx.waitUntil(putPromise);
+    } else {
+      await putPromise;
+    }
+  }
+
+  if (method === "HEAD") {
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  return response;
 }
 
 export default {
-  fetch: handleWorkerRequest,
+  fetch(
+    request: Request,
+    env: Record<string, unknown> = {},
+    ctx?: WorkerExecutionContext,
+  ): Promise<Response> {
+    return handleWorkerRequest(request, env, ctx);
+  },
 };

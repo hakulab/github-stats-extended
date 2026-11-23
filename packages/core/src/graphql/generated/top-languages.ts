@@ -32,6 +32,7 @@ export type TopLanguagesQueryVariables = Exact<{
 
 export type TopLanguagesQuery = {
   user: {
+    login: string;
     repositories: {
       nodes: Array<{
         name: string;
@@ -95,6 +96,7 @@ export const TopLanguagesDocument = graphqlDocument<
 >(`
 query topLanguages($login: String!, $ownerAffiliations: [RepositoryAffiliation]) {
   user(login: $login) {
+    login
     repositories(ownerAffiliations: $ownerAffiliations, isFork: false, first: 100) {
       nodes {
         ...TopLanguagesRepository

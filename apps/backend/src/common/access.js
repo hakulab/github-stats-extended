@@ -11,6 +11,10 @@ const NOT_WHITELISTED_USERNAME_MESSAGE = "This username is not whitelisted";
 const NOT_WHITELISTED_GIST_MESSAGE = "This gist ID is not whitelisted";
 const BLACKLISTED_MESSAGE = "This username is blacklisted";
 
+const BLACKLIST_LOWER = new Set(
+  blacklist.map((entry) => entry.trim().toLowerCase()),
+);
+
 /**
  * Guards access using whitelist/blacklist.
  *
@@ -35,7 +39,14 @@ const guardAccess = ({ id, type, colors }) => {
       ? NOT_WHITELISTED_GIST_MESSAGE
       : NOT_WHITELISTED_USERNAME_MESSAGE;
 
-  if (Array.isArray(currentWhitelist) && !currentWhitelist.includes(id)) {
+  const normalizedId = typeof id === "string" ? id.trim().toLowerCase() : "";
+
+  if (
+    Array.isArray(currentWhitelist) &&
+    !currentWhitelist.some(
+      (entry) => entry.trim().toLowerCase() === normalizedId,
+    )
+  ) {
     const result = renderError({
       message: notWhitelistedMsg,
       secondaryMessage: "Please deploy your own instance",
@@ -50,7 +61,7 @@ const guardAccess = ({ id, type, colors }) => {
   if (
     type === "username" &&
     currentWhitelist === undefined &&
-    blacklist.includes(id)
+    BLACKLIST_LOWER.has(normalizedId)
   ) {
     const result = renderError({
       message: BLACKLISTED_MESSAGE,
