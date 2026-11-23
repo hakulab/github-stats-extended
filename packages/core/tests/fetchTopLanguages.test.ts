@@ -195,7 +195,7 @@ describe("FetchTopLanguages", () => {
   it("should aggregate languages across additional repo_owners, deduplicate by nameWithOwner, and respect exclude_repo", async () => {
     const queriedOwners: Array<string> = [];
     const ownerResponses: Record<string, object> = {
-      hakulab: {
+      "org-a": {
         data: {
           repositoryOwner: {
             repositories: {
@@ -211,7 +211,7 @@ describe("FetchTopLanguages", () => {
                 },
                 {
                   name: "org-ts",
-                  nameWithOwner: "hakulab/org-ts",
+                  nameWithOwner: "org-a/org-ts",
                   languages: {
                     edges: [
                       {
@@ -223,7 +223,7 @@ describe("FetchTopLanguages", () => {
                 },
                 {
                   name: "excluded-org-repo",
-                  nameWithOwner: "hakulab/excluded-org-repo",
+                  nameWithOwner: "org-a/excluded-org-repo",
                   languages: {
                     edges: [
                       { size: 900, node: { color: "#dea584", name: "Rust" } },
@@ -235,14 +235,14 @@ describe("FetchTopLanguages", () => {
           },
         },
       },
-      hakulattic: {
+      "org-b": {
         data: {
           repositoryOwner: {
             repositories: {
               nodes: [
                 {
                   name: "org-ts",
-                  nameWithOwner: "HAKULAB/org-ts",
+                  nameWithOwner: "ORG-A/org-ts",
                   languages: {
                     edges: [
                       {
@@ -253,8 +253,8 @@ describe("FetchTopLanguages", () => {
                   },
                 },
                 {
-                  name: "attic-py",
-                  nameWithOwner: "hakulattic/attic-py",
+                  name: "archive-py",
+                  nameWithOwner: "org-b/archive-py",
                   languages: {
                     edges: [
                       { size: 250, node: { color: "#3572A5", name: "Python" } },
@@ -291,15 +291,15 @@ describe("FetchTopLanguages", () => {
 
     const langs = await fetchTopLanguages(
       "anuraghazra",
-      ["test-repo-1", "hakulab/excluded-org-repo"],
+      ["test-repo-1", "org-a/excluded-org-repo"],
       1,
       0,
       [],
       null,
-      ["hakulab", "HAKULAB", "anuraghazra", " hakulattic "],
+      ["org-a", "ORG-A", "anuraghazra", " org-b "],
     );
 
-    expect(queriedOwners).toEqual(["hakulab", "hakulattic"]);
+    expect(queriedOwners).toEqual(["org-a", "org-b"]);
     expect(langs).toStrictEqual({
       TypeScript: { color: "#3178c6", count: 1, name: "TypeScript", size: 300 },
       Python: { color: "#3572A5", count: 1, name: "Python", size: 250 },
@@ -311,7 +311,7 @@ describe("FetchTopLanguages", () => {
   it("should fall back to DEFAULT_REPO_OWNERS from env config when repo_owners is omitted", async () => {
     loadConfigFromEnv({
       ...process.env,
-      DEFAULT_REPO_OWNERS: "hakulab, anuraghazra",
+      DEFAULT_REPO_OWNERS: "org-a, anuraghazra",
     });
 
     const queriedOwners: Array<string> = [];
@@ -335,7 +335,7 @@ describe("FetchTopLanguages", () => {
                     nodes: [
                       {
                         name: "org-go",
-                        nameWithOwner: "hakulab/org-go",
+                        nameWithOwner: "org-a/org-go",
                         languages: {
                           edges: [
                             {
@@ -357,7 +357,7 @@ describe("FetchTopLanguages", () => {
 
     try {
       const langs = await fetchTopLanguages("anuraghazra");
-      expect(queriedOwners).toEqual(["hakulab"]);
+      expect(queriedOwners).toEqual(["org-a"]);
       expect(langs["Go"]).toStrictEqual({
         color: "#00ADD8",
         count: 1,

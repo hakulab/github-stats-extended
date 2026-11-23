@@ -193,21 +193,21 @@ describe("Cloudflare Workers fetch adapter", () => {
 
     const response = await worker.fetch(
       new Request(
-        "https://github-stats.hakula.xyz/api?username=hakula139&repo-owners=Hakulab,hakula139,hakulattic,HAKULAB",
+        "https://stats.example.com/api?username=alice&repo-owners=Org-A,alice,org-b,ORG-A",
       ),
-      { DEFAULT_REPO_OWNERS: "hakulab,hakulattic" },
+      { DEFAULT_REPO_OWNERS: "org-a,org-b" },
     );
 
     expect(loadConfigFromEnvMock).toHaveBeenCalledWith({
-      DEFAULT_REPO_OWNERS: "hakulab,hakulattic",
+      DEFAULT_REPO_OWNERS: "org-a,org-b",
     });
     expect(apiMock).toHaveBeenCalledWith(
-      { username: "hakula139", repo_owners: "hakulab,hakulattic" },
+      { username: "alice", repo_owners: "org-a,org-b" },
       null,
     );
     expect(storeRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: "/api?username=hakula139&repo_owners=hakulab%2Chakulattic",
+        url: "/api?username=alice&repo_owners=org-a%2Corg-b",
       }),
     );
     expect(response.status).toBe(200);
