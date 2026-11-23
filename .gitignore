@@ -5,6 +5,8 @@ node_modules
 
 # Project
 coverage
+/.pre-commit-config.yaml
+.wrangler
 
 apps/backend/.vercel
 apps/backend/.env
