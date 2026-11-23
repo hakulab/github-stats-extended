@@ -12,7 +12,7 @@ routes = [{ pattern = "github-stats.hakula.xyz", custom_domain = true }]
 # GIST_WHITELIST, EXCLUDE_REPO, DEFAULT_REPO_OWNERS, FETCH_MULTI_PAGE_STARS, CACHE_SECONDS
 
 [vars]
-WHITELIST = "hakula139"
+WHITELIST = "hakula139,Hakula"
 
 [observability.logs]
 enabled = true
