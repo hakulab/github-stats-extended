@@ -1,0 +1,21 @@
+#:schema ../../node_modules/wrangler/config-schema.json
+name = "github-stats-extended"
+main = "src/worker.ts"
+compatibility_date = "2025-07-29"
+compatibility_flags = ["nodejs_compat"]
+
+routes = [{ pattern = "github-stats.hakula.xyz", custom_domain = true }]
+
+# Set secrets via `wrangler secret put`:
+# PAT_1, PAT_2, ...  - GitHub Personal Access Tokens
+# Optional vars:
+# WHITELIST, GIST_WHITELIST, EXCLUDE_REPO, FETCH_MULTI_PAGE_STARS, CACHE_SECONDS
+
+[observability.logs]
+enabled = true
+
+[placement]
+mode = "smart"
+
+[dev]
+port = 8787
