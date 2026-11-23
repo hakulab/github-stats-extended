@@ -185,6 +185,34 @@ describe("Cloudflare Workers fetch adapter", () => {
     expect(await response.json()).toEqual({ error: "Method Not Allowed" });
   });
 
+  it("normalizes repo_owners and repo-owners query params for canonical routing and caching", async () => {
+    apiMock.mockResolvedValue({
+      status: "success",
+      content: "<svg>stats</svg>",
+    });
+
+    const response = await worker.fetch(
+      new Request(
+        "https://stats.example.com/api?username=alice&repo-owners=Org-A,alice,org-b,ORG-A",
+      ),
+      { DEFAULT_REPO_OWNERS: "org-a,org-b" },
+    );
+
+    expect(loadConfigFromEnvMock).toHaveBeenCalledWith({
+      DEFAULT_REPO_OWNERS: "org-a,org-b",
+    });
+    expect(apiMock).toHaveBeenCalledWith(
+      { username: "alice", repo_owners: "org-a,org-b" },
+      null,
+    );
+    expect(storeRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "/api?username=alice&repo_owners=org-a%2Corg-b",
+      }),
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("returns 404 for unknown routes", async () => {
     const response = await worker.fetch(
       new Request("https://stats.example.com/unknown"),

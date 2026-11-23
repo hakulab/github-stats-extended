@@ -1,9 +1,10 @@
 fragment RepoNode on Repository {
   name
+  nameWithOwner
   stargazerCount
 }
 
-fragment RepoStars on User {
+fragment RepoStars on RepositoryOwner {
   repositories(
     first: 100
     after: $after
@@ -27,6 +28,16 @@ query userRepos(
   $ownerAffiliations: [RepositoryAffiliation]
 ) {
   user(login: $login) {
+    ...RepoStars
+  }
+}
+
+query ownerRepos(
+  $login: String!
+  $after: String
+  $ownerAffiliations: [RepositoryAffiliation]
+) {
+  repositoryOwner(login: $login) {
     ...RepoStars
   }
 }

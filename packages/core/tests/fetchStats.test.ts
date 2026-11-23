@@ -8,6 +8,7 @@ import { fetchStats } from "../src/fetchers/stats.js";
 import type { StatsData } from "../src/fetchers/types.js";
 import type { ContributionsQuery } from "../src/graphql/contributionsDocument.js";
 import type {
+  OwnerReposQuery,
   RangeContributionsByRepoFragment,
   RepoStarsFragment,
   UserInfoQuery,
@@ -51,9 +52,21 @@ const user_stats: QueryUser<UserInfoQuery> = {
   repositories: {
     totalCount: 3,
     nodes: [
-      { name: "test-repo-1", stargazerCount: 100 },
-      { name: "test-repo-2", stargazerCount: 100 },
-      { name: "test-repo-3", stargazerCount: 100 },
+      {
+        name: "test-repo-1",
+        nameWithOwner: "anuraghazra/test-repo-1",
+        stargazerCount: 100,
+      },
+      {
+        name: "test-repo-2",
+        nameWithOwner: "anuraghazra/test-repo-2",
+        stargazerCount: 100,
+      },
+      {
+        name: "test-repo-3",
+        nameWithOwner: "anuraghazra/test-repo-3",
+        stargazerCount: 100,
+      },
     ],
     pageInfo: {
       hasNextPage: true,
@@ -89,8 +102,16 @@ const data_without_pull_requests: GraphQLBody<UserInfoQuery> = {
 const repo_page: RepoStarsFragment["repositories"] = {
   totalCount: 2,
   nodes: [
-    { name: "test-repo-4", stargazerCount: 50 },
-    { name: "test-repo-5", stargazerCount: 50 },
+    {
+      name: "test-repo-4",
+      nameWithOwner: "anuraghazra/test-repo-4",
+      stargazerCount: 50,
+    },
+    {
+      name: "test-repo-5",
+      nameWithOwner: "anuraghazra/test-repo-5",
+      stargazerCount: 50,
+    },
   ],
   pageInfo: {
     hasNextPage: false,
@@ -130,11 +151,31 @@ const data_repo_zero_stars: GraphQLBody<UserReposQuery> = {
       repositories: {
         totalCount: 5,
         nodes: [
-          { name: "test-repo-1", stargazerCount: 100 },
-          { name: "test-repo-2", stargazerCount: 100 },
-          { name: "test-repo-3", stargazerCount: 100 },
-          { name: "test-repo-4", stargazerCount: 0 },
-          { name: "test-repo-5", stargazerCount: 0 },
+          {
+            name: "test-repo-1",
+            nameWithOwner: "anuraghazra/test-repo-1",
+            stargazerCount: 100,
+          },
+          {
+            name: "test-repo-2",
+            nameWithOwner: "anuraghazra/test-repo-2",
+            stargazerCount: 100,
+          },
+          {
+            name: "test-repo-3",
+            nameWithOwner: "anuraghazra/test-repo-3",
+            stargazerCount: 100,
+          },
+          {
+            name: "test-repo-4",
+            nameWithOwner: "anuraghazra/test-repo-4",
+            stargazerCount: 0,
+          },
+          {
+            name: "test-repo-5",
+            nameWithOwner: "anuraghazra/test-repo-5",
+            stargazerCount: 0,
+          },
         ],
         pageInfo: {
           hasNextPage: true,
@@ -241,6 +282,7 @@ const fetchStatsWith = ({
   include_contributions = false,
   include_all_time_contribs = false,
   contribs_include_own_repos = false,
+  repo_owners,
 }: {
   include_all_commits?: boolean;
   exclude_repo?: Array<string>;
@@ -251,6 +293,7 @@ const fetchStatsWith = ({
   include_contributions?: boolean;
   include_all_time_contribs?: boolean;
   contribs_include_own_repos?: boolean;
+  repo_owners?: Array<string>;
 }) =>
   fetchStats(
     "anuraghazra",
@@ -271,6 +314,8 @@ const fetchStatsWith = ({
     include_contributions,
     include_all_time_contribs,
     contribs_include_own_repos,
+    null,
+    repo_owners,
   );
 
 type RankInput = Parameters<typeof calculateRank>[0];
@@ -846,5 +891,143 @@ describe("Test fetchStats", () => {
     );
 
     expect(contributedToCallCount).toBe(4);
+  });
+
+  it("should aggregate stars across additional repo_owners, deduplicate by nameWithOwner, and respect exclude_repo", async () => {
+    const queriedOwners: Array<string> = [];
+    const ownerResponses: Record<string, GraphQLBody<OwnerReposQuery>> = {
+      "org-a": {
+        data: {
+          repositoryOwner: {
+            repositories: {
+              totalCount: 3,
+              nodes: [
+                {
+                  name: "test-repo-1",
+                  nameWithOwner: "anuraghazra/test-repo-1",
+                  stargazerCount: 100,
+                },
+                {
+                  name: "org-repo-1",
+                  nameWithOwner: "org-a/org-repo-1",
+                  stargazerCount: 40,
+                },
+                {
+                  name: "excluded-org-repo",
+                  nameWithOwner: "org-a/excluded-org-repo",
+                  stargazerCount: 999,
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      },
+      "org-b": {
+        data: {
+          repositoryOwner: {
+            repositories: {
+              totalCount: 2,
+              nodes: [
+                {
+                  name: "org-repo-1",
+                  nameWithOwner: "ORG-A/org-repo-1",
+                  stargazerCount: 40,
+                },
+                {
+                  name: "archive-repo",
+                  nameWithOwner: "org-b/archive-repo",
+                  stargazerCount: 25,
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      },
+    };
+
+    nock.cleanAll();
+    nock("https://api.github.com")
+      .persist()
+      .post("/graphql")
+      .reply(async (request: Request) => {
+        const req = (await request.json()) as {
+          query: string;
+          variables: { login: string };
+        };
+        if (req.query.includes("query ownerRepos(")) {
+          queriedOwners.push(req.variables.login);
+          return [
+            200,
+            ownerResponses[req.variables.login.toLowerCase()] ?? {
+              data: { repositoryOwner: null },
+            },
+          ];
+        }
+        return [200, data_stats];
+      });
+
+    const stats = await fetchStatsWith({
+      exclude_repo: ["test-repo-2", "org-a/excluded-org-repo"],
+      repo_owners: ["org-a", "ORG-A", "anuraghazra", " org-b ", ""],
+    });
+
+    expect(queriedOwners).toEqual(["org-a", "org-b"]);
+    expect(stats.totalStars).toBe(100 + 100 + 40 + 25);
+    expect(stats.totalCommits).toBe(100);
+    expect(stats.totalPRs).toBe(300);
+    expect(stats.totalIssues).toBe(200);
+    expect(stats.totalReviews).toBe(50);
+  });
+
+  it("should fall back to DEFAULT_REPO_OWNERS from env config when repo_owners is omitted", async () => {
+    loadConfigFromEnv({
+      ...process.env,
+      DEFAULT_REPO_OWNERS: "org-a, anuraghazra, ORG-A",
+    });
+
+    const queriedOwners: Array<string> = [];
+    const ownerResponse: GraphQLBody<OwnerReposQuery> = {
+      data: {
+        repositoryOwner: {
+          repositories: {
+            totalCount: 1,
+            nodes: [
+              {
+                name: "org-repo",
+                nameWithOwner: "org-a/org-repo",
+                stargazerCount: 55,
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    };
+
+    nock.cleanAll();
+    nock("https://api.github.com")
+      .persist()
+      .post("/graphql")
+      .reply(async (request: Request) => {
+        const req = (await request.json()) as {
+          query: string;
+          variables: { login: string };
+        };
+        if (req.query.includes("query ownerRepos(")) {
+          queriedOwners.push(req.variables.login);
+          return [200, ownerResponse];
+        }
+        return [200, data_stats];
+      });
+
+    try {
+      const stats = await fetchStatsWith({});
+      expect(queriedOwners).toEqual(["org-a"]);
+      expect(stats.totalStars).toBe(355);
+    } finally {
+      loadConfigFromEnv();
+    }
   });
 });

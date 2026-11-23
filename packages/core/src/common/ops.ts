@@ -148,6 +148,113 @@ const buildSearchFilter = (
   return repoFilter + orgFilter;
 };
 
+/**
+ * Normalize, trim, and deduplicate repository owner logins case-insensitively,
+ * optionally excluding a primary username that is already fetched.
+ *
+ * @param owners Raw owner login list.
+ * @param primaryUsername Optional primary username to omit from extra owners.
+ * @returns Deduplicated, trimmed owner logins preserving first-seen casing.
+ */
+const normalizeRepoOwners = (
+  owners: Array<string>,
+  primaryUsername?: string,
+): Array<string> => {
+  const seen = new Set<string>();
+  if (primaryUsername) {
+    seen.add(lowercaseTrim(primaryUsername));
+  }
+
+  const normalized: Array<string> = [];
+  for (const rawOwner of owners) {
+    const trimmed = rawOwner.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const lower = trimmed.toLowerCase();
+    if (seen.has(lower)) {
+      continue;
+    }
+    seen.add(lower);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+};
+
+/**
+ * Resolve effective extra repository owners from explicit param values or
+ * `DEFAULT_REPO_OWNERS` / `REPO_OWNERS` env config, normalized and deduplicated.
+ *
+ * @param explicitOwners Explicit owner logins passed via query/argument, or `undefined` to use env default.
+ * @param defaultOwners Default owner logins from runtime config.
+ * @param primaryUsername Primary username already queried.
+ * @returns Normalized extra owner logins.
+ */
+const resolveRepoOwners = (
+  explicitOwners: Array<string> | undefined,
+  defaultOwners: Array<string>,
+  primaryUsername: string,
+): Array<string> => {
+  const source = explicitOwners ?? defaultOwners;
+  return normalizeRepoOwners(source, primaryUsername);
+};
+
+/**
+ * Check whether a repository matches an exclusion set by either short `name`
+ * or full `nameWithOwner` (case-insensitive for `owner/repo`).
+ *
+ * @param repo Repository to check.
+ * @param repo.name Short repository name.
+ * @param repo.nameWithOwner Optional `owner/repo` full name.
+ * @param excluded Exact repo names and `owner/repo` entries to exclude.
+ * @param excludedLower Optional lowercased exclusion set for case-insensitive `nameWithOwner` matching.
+ * @returns True if the repository should be excluded.
+ */
+const isRepoExcluded = (
+  repo: { name: string; nameWithOwner?: string | null },
+  excluded: ReadonlySet<string>,
+  excludedLower?: ReadonlySet<string>,
+): boolean => {
+  if (excluded.has(repo.name)) {
+    return true;
+  }
+  if (repo.nameWithOwner) {
+    if (excluded.has(repo.nameWithOwner)) {
+      return true;
+    }
+    if (excludedLower?.has(repo.nameWithOwner.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Deduplicate repositories by `nameWithOwner` (case-insensitive), falling back
+ * to `name` when `nameWithOwner` is absent in legacy fixtures.
+ *
+ * @param repos Repository nodes to deduplicate.
+ * @returns Deduplicated repository nodes preserving first-seen order.
+ */
+const deduplicateRepoNodes = <
+  T extends { name: string; nameWithOwner?: string | null },
+>(
+  repos: Array<T>,
+): Array<T> => {
+  const seen = new Set<string>();
+  const unique: Array<T> = [];
+  for (const repo of repos) {
+    const key = (repo.nameWithOwner || repo.name).toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(repo);
+  }
+  return unique;
+};
+
 export {
   parseBoolean,
   parseArray,
@@ -157,4 +264,8 @@ export {
   parseEmojis,
   parseOwnerAffiliations,
   buildSearchFilter,
+  normalizeRepoOwners,
+  resolveRepoOwners,
+  isRepoExcluded,
+  deduplicateRepoNodes,
 };
