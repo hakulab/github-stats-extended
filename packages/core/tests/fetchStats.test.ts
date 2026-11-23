@@ -896,7 +896,7 @@ describe("Test fetchStats", () => {
   it("should aggregate stars across additional repo_owners, deduplicate by nameWithOwner, and respect exclude_repo", async () => {
     const queriedOwners: Array<string> = [];
     const ownerResponses: Record<string, GraphQLBody<OwnerReposQuery>> = {
-      hakulab: {
+      "org-a": {
         data: {
           repositoryOwner: {
             repositories: {
@@ -909,12 +909,12 @@ describe("Test fetchStats", () => {
                 },
                 {
                   name: "org-repo-1",
-                  nameWithOwner: "hakulab/org-repo-1",
+                  nameWithOwner: "org-a/org-repo-1",
                   stargazerCount: 40,
                 },
                 {
                   name: "excluded-org-repo",
-                  nameWithOwner: "hakulab/excluded-org-repo",
+                  nameWithOwner: "org-a/excluded-org-repo",
                   stargazerCount: 999,
                 },
               ],
@@ -923,7 +923,7 @@ describe("Test fetchStats", () => {
           },
         },
       },
-      hakulattic: {
+      "org-b": {
         data: {
           repositoryOwner: {
             repositories: {
@@ -931,12 +931,12 @@ describe("Test fetchStats", () => {
               nodes: [
                 {
                   name: "org-repo-1",
-                  nameWithOwner: "HAKULAB/org-repo-1",
+                  nameWithOwner: "ORG-A/org-repo-1",
                   stargazerCount: 40,
                 },
                 {
-                  name: "attic-repo",
-                  nameWithOwner: "hakulattic/attic-repo",
+                  name: "archive-repo",
+                  nameWithOwner: "org-b/archive-repo",
                   stargazerCount: 25,
                 },
               ],
@@ -969,11 +969,11 @@ describe("Test fetchStats", () => {
       });
 
     const stats = await fetchStatsWith({
-      exclude_repo: ["test-repo-2", "hakulab/excluded-org-repo"],
-      repo_owners: ["hakulab", "HAKULAB", "anuraghazra", " hakulattic ", ""],
+      exclude_repo: ["test-repo-2", "org-a/excluded-org-repo"],
+      repo_owners: ["org-a", "ORG-A", "anuraghazra", " org-b ", ""],
     });
 
-    expect(queriedOwners).toEqual(["hakulab", "hakulattic"]);
+    expect(queriedOwners).toEqual(["org-a", "org-b"]);
     expect(stats.totalStars).toBe(100 + 100 + 40 + 25);
     expect(stats.totalCommits).toBe(100);
     expect(stats.totalPRs).toBe(300);
@@ -984,7 +984,7 @@ describe("Test fetchStats", () => {
   it("should fall back to DEFAULT_REPO_OWNERS from env config when repo_owners is omitted", async () => {
     loadConfigFromEnv({
       ...process.env,
-      DEFAULT_REPO_OWNERS: "hakulab, anuraghazra, HAKULAB",
+      DEFAULT_REPO_OWNERS: "org-a, anuraghazra, ORG-A",
     });
 
     const queriedOwners: Array<string> = [];
@@ -996,7 +996,7 @@ describe("Test fetchStats", () => {
             nodes: [
               {
                 name: "org-repo",
-                nameWithOwner: "hakulab/org-repo",
+                nameWithOwner: "org-a/org-repo",
                 stargazerCount: 55,
               },
             ],
@@ -1024,7 +1024,7 @@ describe("Test fetchStats", () => {
 
     try {
       const stats = await fetchStatsWith({});
-      expect(queriedOwners).toEqual(["hakulab"]);
+      expect(queriedOwners).toEqual(["org-a"]);
       expect(stats.totalStars).toBe(355);
     } finally {
       loadConfigFromEnv();
