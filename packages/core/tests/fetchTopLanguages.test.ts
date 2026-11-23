@@ -22,6 +22,7 @@ afterEach(() => {
 const data_langs = {
   data: {
     user: {
+      login: "anuraghazra",
       repositories: {
         nodes: [
           {
@@ -367,5 +368,54 @@ describe("FetchTopLanguages", () => {
     } finally {
       loadConfigFromEnv();
     }
+  });
+
+  it("should throw USER_NOT_FOUND when GraphQL returns null user without errors", async () => {
+    nock("https://api.github.com")
+      .post("/graphql")
+      .reply(200, { data: { user: null } });
+
+    await expect(fetchTopLanguages("missing-user")).rejects.toThrow(
+      "Could not fetch user.",
+    );
+  });
+
+  it("should deduplicate extra repo_owners against canonical user.login", async () => {
+    const queriedOwners: Array<string> = [];
+    nock.cleanAll();
+    nock("https://api.github.com")
+      .persist()
+      .post("/graphql")
+      .reply(async (request: Request) => {
+        const req = (await request.json()) as {
+          query: string;
+          variables: { login: string };
+        };
+        if (req.query.includes("query ownerTopLanguages(")) {
+          queriedOwners.push(req.variables.login);
+          return [
+            200,
+            { data: { repositoryOwner: { repositories: { nodes: [] } } } },
+          ];
+        }
+        return [
+          200,
+          {
+            data: {
+              user: {
+                login: "CanonicalLogin",
+                repositories: { nodes: [] },
+              },
+            },
+          },
+        ];
+      });
+
+    await fetchTopLanguages("old-login", [], 1, 0, [], null, [
+      "canonicallogin",
+      "org-a",
+    ]);
+
+    expect(queriedOwners).toEqual(["org-a"]);
   });
 });

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { getConfig, loadConfigFromEnv } from "../src/common/config.js";
 import {
+  MAX_ADDITIONAL_REPO_OWNERS,
   chunkArray,
   clampValue,
+  isRepoExcluded,
   lowercaseTrim,
+  normalizeRepoOwners,
   parseArray,
   parseBoolean,
   parseEmojis,
@@ -71,5 +75,72 @@ describe("Test ops.js", () => {
     expect(() => parseEmojis("")).toThrow(/parseEmoji/);
     // @ts-expect-error testing missing argument
     expect(() => parseEmojis()).toThrow(/parseEmoji/);
+  });
+
+  it("should cap normalizeRepoOwners at MAX_ADDITIONAL_REPO_OWNERS while preserving caller order", () => {
+    const owners = Array.from({ length: 15 }, (_, index) => `org-${index + 1}`);
+    const result = normalizeRepoOwners(
+      ["primary-user", "org-2", ...owners],
+      "PRIMARY-USER",
+    );
+
+    expect(result).toHaveLength(MAX_ADDITIONAL_REPO_OWNERS);
+    expect(result).toEqual([
+      "org-2",
+      "org-1",
+      "org-3",
+      "org-4",
+      "org-5",
+      "org-6",
+      "org-7",
+      "org-8",
+      "org-9",
+      "org-10",
+    ]);
+  });
+
+  it("should match short repo names and nameWithOwner case-insensitively in isRepoExcluded", () => {
+    const excluded = new Set(["MyRepo", "Org-A/Secret"]);
+    const excludedLower = new Set(["myrepo", "org-a/secret"]);
+
+    expect(
+      isRepoExcluded(
+        { name: "myrepo", nameWithOwner: "alice/myrepo" },
+        excluded,
+        excludedLower,
+      ),
+    ).toBe(true);
+    expect(
+      isRepoExcluded(
+        { name: "secret", nameWithOwner: "org-a/SECRET" },
+        excluded,
+        excludedLower,
+      ),
+    ).toBe(true);
+    expect(
+      isRepoExcluded(
+        { name: "other", nameWithOwner: "alice/other" },
+        excluded,
+        excludedLower,
+      ),
+    ).toBe(false);
+  });
+
+  it("should trim and filter empty CSV entries in loadConfigFromEnv", () => {
+    try {
+      loadConfigFromEnv({
+        WHITELIST: " alice , , bob , ",
+        GIST_WHITELIST: " , , ",
+        EXCLUDE_REPO: " repo-a , , org/repo-b ",
+        DEFAULT_REPO_OWNERS: " org-a , , org-b ",
+      });
+      const config = getConfig();
+      expect(config.whitelist).toEqual(["alice", "bob"]);
+      expect(config.gistWhitelist).toBeUndefined();
+      expect(config.excludeRepositories).toEqual(["repo-a", "org/repo-b"]);
+      expect(config.defaultRepoOwners).toEqual(["org-a", "org-b"]);
+    } finally {
+      loadConfigFromEnv();
+    }
   });
 });

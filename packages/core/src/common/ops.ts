@@ -149,12 +149,17 @@ const buildSearchFilter = (
 };
 
 /**
- * Normalize, trim, and deduplicate repository owner logins case-insensitively,
+ * Maximum number of additional repository owners aggregated alongside the primary user.
+ */
+const MAX_ADDITIONAL_REPO_OWNERS = 10;
+
+/**
+ * Normalize, trim, deduplicate case-insensitively, and cap repository owner logins,
  * optionally excluding a primary username that is already fetched.
  *
  * @param owners Raw owner login list.
  * @param primaryUsername Optional primary username to omit from extra owners.
- * @returns Deduplicated, trimmed owner logins preserving first-seen casing.
+ * @returns Deduplicated, trimmed owner logins preserving first-seen order, capped at `MAX_ADDITIONAL_REPO_OWNERS`.
  */
 const normalizeRepoOwners = (
   owners: Array<string>,
@@ -177,6 +182,9 @@ const normalizeRepoOwners = (
     }
     seen.add(lower);
     normalized.push(trimmed);
+    if (normalized.length >= MAX_ADDITIONAL_REPO_OWNERS) {
+      break;
+    }
   }
 
   return normalized;
@@ -202,13 +210,13 @@ const resolveRepoOwners = (
 
 /**
  * Check whether a repository matches an exclusion set by either short `name`
- * or full `nameWithOwner` (case-insensitive for `owner/repo`).
+ * or full `nameWithOwner` (case-insensitive when `excludedLower` is supplied).
  *
  * @param repo Repository to check.
  * @param repo.name Short repository name.
  * @param repo.nameWithOwner Optional `owner/repo` full name.
  * @param excluded Exact repo names and `owner/repo` entries to exclude.
- * @param excludedLower Optional lowercased exclusion set for case-insensitive `nameWithOwner` matching.
+ * @param excludedLower Optional lowercased exclusion set for case-insensitive matching.
  * @returns True if the repository should be excluded.
  */
 const isRepoExcluded = (
@@ -216,7 +224,7 @@ const isRepoExcluded = (
   excluded: ReadonlySet<string>,
   excludedLower?: ReadonlySet<string>,
 ): boolean => {
-  if (excluded.has(repo.name)) {
+  if (excluded.has(repo.name) || excludedLower?.has(repo.name.toLowerCase())) {
     return true;
   }
   if (repo.nameWithOwner) {
@@ -256,6 +264,7 @@ const deduplicateRepoNodes = <
 };
 
 export {
+  MAX_ADDITIONAL_REPO_OWNERS,
   parseBoolean,
   parseArray,
   clampValue,

@@ -35,7 +35,14 @@ const guardAccess = ({ id, type, colors }) => {
       ? NOT_WHITELISTED_GIST_MESSAGE
       : NOT_WHITELISTED_USERNAME_MESSAGE;
 
-  if (Array.isArray(currentWhitelist) && !currentWhitelist.includes(id)) {
+  const normalizedId = typeof id === "string" ? id.trim().toLowerCase() : "";
+
+  if (
+    Array.isArray(currentWhitelist) &&
+    !currentWhitelist.some(
+      (entry) => entry.trim().toLowerCase() === normalizedId,
+    )
+  ) {
     const result = renderError({
       message: notWhitelistedMsg,
       secondaryMessage: "Please deploy your own instance",

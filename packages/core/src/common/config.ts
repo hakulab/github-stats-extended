@@ -17,10 +17,18 @@ interface Config {
 
 /**
  * @param value Comma-separated string.
- * @returns Parsed string values.
+ * @returns Parsed, trimmed non-empty string values, or `undefined` if unset/empty.
  */
-const parseCsv = (value: string | undefined): Array<string> | undefined =>
-  value ? value.split(",") : undefined;
+const parseCsv = (value: string | undefined): Array<string> | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const items = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return items.length > 0 ? items : undefined;
+};
 
 /**
  * @param value Raw `FETCH_MULTI_PAGE_STARS` value.

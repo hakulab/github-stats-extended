@@ -108,6 +108,11 @@ const fetchTopLanguages = async (
     );
   }
 
+  const user = res.data.data.user;
+  if (!user) {
+    throw new CustomError("Could not fetch user.", CustomError.USER_NOT_FOUND);
+  }
+
   const allExcludedRepos = [
     ...exclude_repo,
     ...getConfig().excludeRepositories,
@@ -117,14 +122,14 @@ const fetchTopLanguages = async (
     allExcludedRepos.map((name) => name.toLowerCase()),
   );
 
-  const primaryRepoNodes = (
-    res.data.data.user?.repositories.nodes ?? []
-  ).filter((node): node is TopLanguagesRepositoryFragment => node !== null);
+  const primaryRepoNodes = (user.repositories.nodes ?? []).filter(
+    (node): node is TopLanguagesRepositoryFragment => node !== null,
+  );
 
   const extraOwners = resolveRepoOwners(
     repo_owners,
     getConfig().defaultRepoOwners,
-    username,
+    user.login || username,
   );
   let allRepoNodes: Array<TopLanguagesRepositoryFragment> = primaryRepoNodes;
   if (extraOwners.length > 0) {
