@@ -9,6 +9,7 @@ interface Config {
   whitelist: Array<string> | undefined;
   gistWhitelist: Array<string> | undefined;
   excludeRepositories: Array<string>;
+  defaultRepoOwners: Array<string>;
   /** Max pages of starred repos to fetch; `Infinity` means every page, `1` only the first. */
   fetchMultiPageStars: number;
   pats: Array<PersonalAccessToken>;
@@ -64,6 +65,8 @@ export const loadConfigFromEnv = (env: Env = getDefaultEnv()): void => {
     whitelist: parseCsv(env["WHITELIST"]),
     gistWhitelist: parseCsv(env["GIST_WHITELIST"]),
     excludeRepositories: parseCsv(env["EXCLUDE_REPO"]) ?? [],
+    defaultRepoOwners:
+      parseCsv(env["DEFAULT_REPO_OWNERS"] ?? env["REPO_OWNERS"]) ?? [],
     fetchMultiPageStars: parseFetchMultiPageStars(
       env["FETCH_MULTI_PAGE_STARS"],
     ),

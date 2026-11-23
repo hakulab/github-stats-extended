@@ -9,7 +9,7 @@ routes = [{ pattern = "github-stats.hakula.xyz", custom_domain = true }]
 # Set secrets via `wrangler secret put`:
 # PAT_1, PAT_2, ...  - GitHub Personal Access Tokens
 # Optional vars:
-# WHITELIST, GIST_WHITELIST, EXCLUDE_REPO, FETCH_MULTI_PAGE_STARS, CACHE_SECONDS
+# WHITELIST, GIST_WHITELIST, EXCLUDE_REPO, DEFAULT_REPO_OWNERS, FETCH_MULTI_PAGE_STARS, CACHE_SECONDS
 
 [observability.logs]
 enabled = true
