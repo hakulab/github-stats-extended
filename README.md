@@ -140,15 +140,15 @@ The stats (`/api`) and top-languages (`/api/top-langs`) endpoints can aggregate 
 
   Owner logins are trimmed and deduplicated case-insensitively, the primary `username` is skipped automatically, and merged repositories are deduplicated by `owner/repo`. Both `exclude_repo` and `EXCLUDE_REPO` match short repository names (`repo-name`) and qualified names (`org-a/repo-name`).
 
-- **Environment default**: Set `DEFAULT_REPO_OWNERS` (or its `REPO_OWNERS` fallback) to a comma-separated list such as `org-a,org-b` to aggregate those owners whenever a request omits `repo_owners` and `repo-owners`.
+- **Environment default**: Set `DEFAULT_REPO_OWNERS` (or its `REPO_OWNERS` fallback) to a comma-separated list of owners to aggregate whenever a request omits `repo_owners` and `repo-owners`.
 
 - **Per-request opt-out**: Pass an empty `repo_owners` parameter (`?username=alice&repo_owners=`) to override `DEFAULT_REPO_OWNERS` / `REPO_OWNERS` and query only `alice`'s own repositories.
 
 ## Cloudflare Workers Deployment
 
-The backend includes a Cloudflare Workers entrypoint (`apps/backend/src/worker.ts`) configured in `apps/backend/wrangler.toml`. It serves `/api`, `/api/top-langs`, `/api/pin`, `/api/gist`, and `/api/wakatime`, and canonicalizes `repo_owners` / `repo-owners` query parameters for consistent cache keys.
+The backend includes a Cloudflare Workers entrypoint (`apps/backend/src/worker.ts`) configured in `apps/backend/wrangler.toml`, serving `/api`, `/api/top-langs`, `/api/pin`, `/api/gist`, and `/api/wakatime`.
 
-1. Review `apps/backend/wrangler.toml` and adjust `name` and `routes` for your Cloudflare account and domain. For restricted or multi-owner instances, set plaintext bindings under `[vars]`:
+1. Update `name`, `routes`, and `[vars]` in `apps/backend/wrangler.toml` for your Cloudflare account and domain. Remove `WHITELIST` to allow all usernames, or set `DEFAULT_REPO_OWNERS` for multi-owner defaults:
 
    ```toml
    [vars]
