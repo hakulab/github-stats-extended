@@ -9,14 +9,22 @@ import { wrapTextMultiline } from "../common/fmt.js";
 import { createGraphQLFetcher } from "../common/http.js";
 import type { GraphQLResponse } from "../common/http.js";
 import { logger } from "../common/log.js";
-import { buildSearchFilter, parseOwnerAffiliations } from "../common/ops.js";
+import {
+  buildSearchFilter,
+  deduplicateRepoNodes,
+  isRepoExcluded,
+  parseOwnerAffiliations,
+  resolveRepoOwners,
+} from "../common/ops.js";
 import { retryer } from "../common/retryer.js";
 import { buildContributionsDocument } from "../graphql/contributionsDocument.js";
 import {
+  OwnerReposDocument,
   UserInfoDocument,
   UserReposDocument,
 } from "../graphql/generated/stats.js";
 import type {
+  OwnerReposQuery,
   RepoNodeFragment,
   UserInfoQuery,
   UserInfoQueryVariables,
@@ -39,6 +47,7 @@ type StatsFetcherResponse = Pick<
 const fetcher = createGraphQLFetcher(UserInfoDocument, "bearer");
 /** Fetcher for the pages after the first, which only need `repositories`. */
 const reposFetcher = createGraphQLFetcher(UserReposDocument, "bearer");
+const ownerReposFetcher = createGraphQLFetcher(OwnerReposDocument, "bearer");
 
 /**
  * Fetch stats information for a given username.
@@ -305,6 +314,69 @@ const graphqlError = (
 };
 
 /**
+ * Fetch repositories for an additional owner (user or organization) with
+ * multi-page star pagination matching `statsFetcher`.
+ *
+ * @param login GitHub user or organization login.
+ * @param ownerAffiliations Owner affiliations filter.
+ * @param pat Optional PAT override.
+ * @returns Repository nodes for the owner.
+ */
+const fetchOwnerRepositories = async (
+  login: string,
+  ownerAffiliations: UserInfoQueryVariables["ownerAffiliations"],
+  pat: string | null,
+): Promise<Array<RepoNodeFragment>> => {
+  const pageLimit = getConfig().fetchMultiPageStars;
+  const repoNodes: Array<RepoNodeFragment> = [];
+  let after: string | null = null;
+  let previousCursor: string | null = null;
+  let fetchedPages = 0;
+
+  while (fetchedPages < pageLimit) {
+    const res: GraphQLResponse<OwnerReposQuery> = await retryer(
+      ownerReposFetcher,
+      { login, after, ownerAffiliations },
+      pat,
+    );
+    if (res.data.errors) {
+      throw graphqlError(
+        res.data.errors,
+        res.statusText,
+        "Something went wrong while trying to retrieve the stats data using the GraphQL API.",
+      );
+    }
+
+    const repositories = res.data.data.repositoryOwner?.repositories;
+    if (!repositories) {
+      break;
+    }
+
+    const pageNodes = (repositories.nodes ?? []).filter(
+      (node): node is RepoNodeFragment => node !== null,
+    );
+    repoNodes.push(...pageNodes);
+    fetchedPages++;
+
+    if (
+      pageNodes.some((node) => node.stargazerCount === 0) ||
+      !repositories.pageInfo.hasNextPage
+    ) {
+      break;
+    }
+
+    const nextCursor = repositories.pageInfo.endCursor;
+    if (nextCursor === null || nextCursor === previousCursor) {
+      break;
+    }
+    previousCursor = nextCursor;
+    after = nextCursor;
+  }
+
+  return repoNodes;
+};
+
+/**
  * Fetch all-time contributions by building a single GraphQL query
  * for all the given years.
  *
@@ -562,6 +634,7 @@ const fetchAllTimeReposContributedTo = async (
  * @param include_all_time_contribs Include all-time count of repos contributed to.
  * @param contribs_include_own_repos Include user-owned repos in contributed-to counts.
  * @param pat Optional PAT override.
+ * @param repo_owners Additional repository owners (users or organizations) to aggregate stars from.
  * @returns Stats data.
  */
 const fetchStats = async (
@@ -584,6 +657,7 @@ const fetchStats = async (
   include_all_time_contribs = false,
   contribs_include_own_repos = false,
   pat: string | null = null,
+  repo_owners?: Array<string>,
 ): Promise<StatsData> => {
   if (!username) {
     throw new MissingParamError(["username"]);
@@ -722,10 +796,35 @@ const fetchStats = async (
     ...getConfig().excludeRepositories,
   ];
   const repoToHide = new Set(allExcludedRepos);
+  const repoToHideLower = new Set(
+    allExcludedRepos.map((name) => name.toLowerCase()),
+  );
 
-  stats.totalStars = (user.repositories.nodes ?? [])
-    .filter((data) => !!data && !repoToHide.has(data.name))
-    .reduce((prev, curr) => prev + (curr?.stargazerCount ?? 0), 0);
+  const primaryRepoNodes = (user.repositories.nodes ?? []).filter(
+    (data): data is RepoNodeFragment => data !== null,
+  );
+
+  const extraOwners = resolveRepoOwners(
+    repo_owners,
+    getConfig().defaultRepoOwners,
+    user.login || username,
+  );
+  let allRepoNodes: Array<RepoNodeFragment> = primaryRepoNodes;
+  if (extraOwners.length > 0) {
+    const extraOwnerRepos = await Promise.all(
+      extraOwners.map((extraOwner) =>
+        fetchOwnerRepositories(extraOwner, affiliations, pat),
+      ),
+    );
+    allRepoNodes = deduplicateRepoNodes([
+      ...primaryRepoNodes,
+      ...extraOwnerRepos.flat(),
+    ]);
+  }
+
+  stats.totalStars = allRepoNodes
+    .filter((data) => !isRepoExcluded(data, repoToHide, repoToHideLower))
+    .reduce((prev, curr) => prev + curr.stargazerCount, 0);
 
   stats.rank = calculateRank({
     all_commits: include_all_commits,

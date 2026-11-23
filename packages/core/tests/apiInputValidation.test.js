@@ -13,11 +13,15 @@ const unsafeValues = ["user name", "user@evil.com", "a<b", "a?b", "a:b", "a&b"];
 describe("API input validation", () => {
   describe.each([
     ["top-langs", "username", topLangsApi],
+    ["top-langs", "repo_owners", topLangsApi],
+    ["top-langs", "repo-owners", topLangsApi],
     ["wakatime", "username", wakatimeApi],
     ["gist", "id", gistApi],
     ["stats", "username", statsApi],
     ["stats", "repo", statsApi],
     ["stats", "owner", statsApi],
+    ["stats", "repo_owners", statsApi],
+    ["stats", "repo-owners", statsApi],
     ["pin", "username", pinApi],
     ["pin", "repo", pinApi],
   ])("%s: %s", (_endpoint, param, api) => {

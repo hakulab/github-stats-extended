@@ -12,6 +12,7 @@ export type TopLanguageFragment = {
 
 export type TopLanguagesRepositoryFragment = {
   name: string;
+  nameWithOwner: string;
   languages: {
     edges: Array<{
       size: number;
@@ -34,6 +35,7 @@ export type TopLanguagesQuery = {
     repositories: {
       nodes: Array<{
         name: string;
+        nameWithOwner: string;
         languages: {
           edges: Array<{
             size: number;
@@ -43,6 +45,48 @@ export type TopLanguagesQuery = {
       } | null> | null;
     };
   } | null;
+};
+
+export type OwnerTopLanguagesQueryVariables = Exact<{
+  login: string;
+  ownerAffiliations?:
+    | Array<Types.RepositoryAffiliation | null | undefined>
+    | Types.RepositoryAffiliation
+    | null
+    | undefined;
+}>;
+
+export type OwnerTopLanguagesQuery = {
+  repositoryOwner:
+    | {
+        repositories: {
+          nodes: Array<{
+            name: string;
+            nameWithOwner: string;
+            languages: {
+              edges: Array<{
+                size: number;
+                node: { color: string | null; name: string };
+              } | null> | null;
+            } | null;
+          } | null> | null;
+        };
+      }
+    | {
+        repositories: {
+          nodes: Array<{
+            name: string;
+            nameWithOwner: string;
+            languages: {
+              edges: Array<{
+                size: number;
+                node: { color: string | null; name: string };
+              } | null> | null;
+            } | null;
+          } | null> | null;
+        };
+      }
+    | null;
 };
 
 export const TopLanguagesDocument = graphqlDocument<
@@ -60,6 +104,37 @@ query topLanguages($login: String!, $ownerAffiliations: [RepositoryAffiliation])
 }
 fragment TopLanguagesRepository on Repository {
   name
+  nameWithOwner
+  languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
+    edges {
+      ...TopLanguage
+    }
+  }
+}
+fragment TopLanguage on LanguageEdge {
+  size
+  node {
+    color
+    name
+  }
+}`);
+
+export const OwnerTopLanguagesDocument = graphqlDocument<
+  OwnerTopLanguagesQuery,
+  OwnerTopLanguagesQueryVariables
+>(`
+query ownerTopLanguages($login: String!, $ownerAffiliations: [RepositoryAffiliation]) {
+  repositoryOwner(login: $login) {
+    repositories(ownerAffiliations: $ownerAffiliations, isFork: false, first: 100) {
+      nodes {
+        ...TopLanguagesRepository
+      }
+    }
+  }
+}
+fragment TopLanguagesRepository on Repository {
+  name
+  nameWithOwner
   languages(first: 10, orderBy: {field: SIZE, direction: DESC}) {
     edges {
       ...TopLanguage

@@ -1,4 +1,7 @@
-import { loadConfigFromEnv } from "@stats-organization/github-readme-stats-core";
+import {
+  loadConfigFromEnv,
+  normalizeRepoOwners,
+} from "@stats-organization/github-readme-stats-core";
 import axios from "axios";
 
 import router from "../router.js";
@@ -6,8 +9,8 @@ import router from "../router.js";
 /**
  * Env vars read by backend modules through `process.env` at request time.
  * `loadConfigFromEnv(env)` covers core's config (`WHITELIST`, `GIST_WHITELIST`,
- * `EXCLUDE_REPO`, `FETCH_MULTI_PAGE_STARS`, `PAT_*`). These are read directly
- * by backend cache and OAuth handlers.
+ * `EXCLUDE_REPO`, `DEFAULT_REPO_OWNERS`, `REPO_OWNERS`, `FETCH_MULTI_PAGE_STARS`,
+ * `PAT_*`). These are read directly by backend cache and OAuth handlers.
  */
 const BRIDGED_PROCESS_ENV_KEYS = [
   "CACHE_SECONDS",
@@ -121,11 +124,30 @@ export async function handleWorkerRequest(
     pathname = pathname.slice(0, -1);
   }
 
+  const query = Object.fromEntries(url.searchParams.entries());
+  const rawRepoOwners = query["repo_owners"] ?? query["repo-owners"];
+  let canonicalSearch = url.search;
+  if (rawRepoOwners !== undefined) {
+    const normalizedOwners = normalizeRepoOwners(
+      rawRepoOwners.split(","),
+      query["username"],
+    );
+    const normalizedValue = normalizedOwners
+      .map((owner) => owner.toLowerCase())
+      .join(",");
+    const canonicalParams = new URLSearchParams(url.searchParams);
+    canonicalParams.delete("repo-owners");
+    canonicalParams.set("repo_owners", normalizedValue);
+    canonicalSearch = `?${canonicalParams.toString()}`;
+    query["repo_owners"] = normalizedValue;
+    delete query["repo-owners"];
+  }
+
   const req: RouterRequest = {
     method: request.method,
-    url: `${pathname}${url.search}`,
+    url: `${pathname}${canonicalSearch}`,
     headers: Object.fromEntries(request.headers.entries()),
-    query: Object.fromEntries(url.searchParams.entries()),
+    query,
   };
 
   const headers = new Headers();

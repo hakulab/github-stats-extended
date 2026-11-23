@@ -5,15 +5,38 @@ type Exact<T extends { [key: string]: unknown }> = { [K in keyof T]: T[K] };
 import type * as Types from "./common.js";
 
 import { graphqlDocument } from "../graphqlDocument.js";
-export type RepoNodeFragment = { name: string; stargazerCount: number };
+export type RepoNodeFragment = {
+  name: string;
+  nameWithOwner: string;
+  stargazerCount: number;
+};
 
-export type RepoStarsFragment = {
+type RepoStars_Organization_Fragment = {
   repositories: {
     totalCount: number;
-    nodes: Array<{ name: string; stargazerCount: number } | null> | null;
+    nodes: Array<{
+      name: string;
+      nameWithOwner: string;
+      stargazerCount: number;
+    } | null> | null;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
   };
 };
+
+type RepoStars_User_Fragment = {
+  repositories: {
+    totalCount: number;
+    nodes: Array<{
+      name: string;
+      nameWithOwner: string;
+      stargazerCount: number;
+    } | null> | null;
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  };
+};
+
+export type RepoStarsFragment =
+  RepoStars_Organization_Fragment | RepoStars_User_Fragment;
 
 export type UserReposQueryVariables = Exact<{
   login: string;
@@ -29,10 +52,51 @@ export type UserReposQuery = {
   user: {
     repositories: {
       totalCount: number;
-      nodes: Array<{ name: string; stargazerCount: number } | null> | null;
+      nodes: Array<{
+        name: string;
+        nameWithOwner: string;
+        stargazerCount: number;
+      } | null> | null;
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
     };
   } | null;
+};
+
+export type OwnerReposQueryVariables = Exact<{
+  login: string;
+  after?: string | null | undefined;
+  ownerAffiliations?:
+    | Array<Types.RepositoryAffiliation | null | undefined>
+    | Types.RepositoryAffiliation
+    | null
+    | undefined;
+}>;
+
+export type OwnerReposQuery = {
+  repositoryOwner:
+    | {
+        repositories: {
+          totalCount: number;
+          nodes: Array<{
+            name: string;
+            nameWithOwner: string;
+            stargazerCount: number;
+          } | null> | null;
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      }
+    | {
+        repositories: {
+          totalCount: number;
+          nodes: Array<{
+            name: string;
+            nameWithOwner: string;
+            stargazerCount: number;
+          } | null> | null;
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      }
+    | null;
 };
 
 export type UserInfoQueryVariables = Exact<{
@@ -67,7 +131,11 @@ export type UserInfoQuery = {
     contributionsCollection: { contributionYears: Array<number> };
     repositories: {
       totalCount: number;
-      nodes: Array<{ name: string; stargazerCount: number } | null> | null;
+      nodes: Array<{
+        name: string;
+        nameWithOwner: string;
+        stargazerCount: number;
+      } | null> | null;
       pageInfo: { hasNextPage: boolean; endCursor: string | null };
     };
   } | null;
@@ -101,7 +169,7 @@ query userRepos($login: String!, $after: String, $ownerAffiliations: [Repository
     ...RepoStars
   }
 }
-fragment RepoStars on User {
+fragment RepoStars on RepositoryOwner {
   repositories(
     first: 100
     after: $after
@@ -120,6 +188,39 @@ fragment RepoStars on User {
 }
 fragment RepoNode on Repository {
   name
+  nameWithOwner
+  stargazerCount
+}`);
+
+export const OwnerReposDocument = graphqlDocument<
+  OwnerReposQuery,
+  OwnerReposQueryVariables
+>(`
+query ownerRepos($login: String!, $after: String, $ownerAffiliations: [RepositoryAffiliation]) {
+  repositoryOwner(login: $login) {
+    ...RepoStars
+  }
+}
+fragment RepoStars on RepositoryOwner {
+  repositories(
+    first: 100
+    after: $after
+    ownerAffiliations: $ownerAffiliations
+    orderBy: {direction: DESC, field: STARGAZERS}
+  ) {
+    totalCount
+    nodes {
+      ...RepoNode
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+fragment RepoNode on Repository {
+  name
+  nameWithOwner
   stargazerCount
 }`);
 
@@ -171,7 +272,7 @@ query userInfo($login: String!, $after: String, $includeMergedPullRequests: Bool
     ...RepoStars
   }
 }
-fragment RepoStars on User {
+fragment RepoStars on RepositoryOwner {
   repositories(
     first: 100
     after: $after
@@ -190,5 +291,6 @@ fragment RepoStars on User {
 }
 fragment RepoNode on Repository {
   name
+  nameWithOwner
   stargazerCount
 }`);

@@ -3,10 +3,19 @@ import { CustomError, MissingParamError } from "../common/error.js";
 import { wrapTextMultiline } from "../common/fmt.js";
 import { createGraphQLFetcher } from "../common/http.js";
 import { logger } from "../common/log.js";
-import { parseOwnerAffiliations } from "../common/ops.js";
+import {
+  deduplicateRepoNodes,
+  isRepoExcluded,
+  parseOwnerAffiliations,
+  resolveRepoOwners,
+} from "../common/ops.js";
 import { retryer } from "../common/retryer.js";
-import { TopLanguagesDocument } from "../graphql/generated/top-languages.js";
+import {
+  OwnerTopLanguagesDocument,
+  TopLanguagesDocument,
+} from "../graphql/generated/top-languages.js";
 import type {
+  OwnerTopLanguagesQueryVariables,
   TopLanguageFragment,
   TopLanguagesRepositoryFragment,
 } from "../graphql/generated/top-languages.js";
@@ -14,6 +23,34 @@ import type {
 import type { Lang, TopLangData } from "./types.js";
 
 const fetcher = createGraphQLFetcher(TopLanguagesDocument, "token");
+const ownerFetcher = createGraphQLFetcher(OwnerTopLanguagesDocument, "token");
+
+const fetchOwnerTopLanguagesRepos = async (
+  login: string,
+  ownerAffiliations: OwnerTopLanguagesQueryVariables["ownerAffiliations"],
+  pat: string | null,
+): Promise<Array<TopLanguagesRepositoryFragment>> => {
+  const res = await retryer(ownerFetcher, { login, ownerAffiliations }, pat);
+
+  if (res.data.errors) {
+    logger.error(res.data.errors);
+    const firstError = res.data.errors[0];
+    if (firstError?.message) {
+      throw new CustomError(
+        wrapTextMultiline(firstError.message, 525, 12)[0] ?? "",
+        res.statusText,
+      );
+    }
+    throw new CustomError(
+      "Something went wrong while trying to retrieve the language data using the GraphQL API.",
+      CustomError.GRAPHQL_ERROR,
+    );
+  }
+
+  return (res.data.data.repositoryOwner?.repositories.nodes ?? []).filter(
+    (node): node is TopLanguagesRepositoryFragment => node !== null,
+  );
+};
 
 /**
  * Fetch top languages for a given username.
@@ -24,6 +61,7 @@ const fetcher = createGraphQLFetcher(TopLanguagesDocument, "token");
  * @param count_weight Weightage to be given to count.
  * @param ownerAffiliations The owner affiliations to filter by. Default: OWNER.
  * @param pat Optional PAT override.
+ * @param repo_owners Additional repository owners (users or organizations) to aggregate languages from.
  * @returns Top languages data.
  */
 const fetchTopLanguages = async (
@@ -33,6 +71,7 @@ const fetchTopLanguages = async (
   count_weight = 0,
   ownerAffiliations: Array<string> = [],
   pat: string | null = null,
+  repo_owners?: Array<string>,
 ): Promise<TopLangData> => {
   if (!username) {
     throw new MissingParamError(["username"]);
@@ -69,21 +108,40 @@ const fetchTopLanguages = async (
     );
   }
 
-  const repoToHide: Record<string, boolean> = {};
   const allExcludedRepos = [
     ...exclude_repo,
     ...getConfig().excludeRepositories,
   ];
+  const repoToHide = new Set(allExcludedRepos);
+  const repoToHideLower = new Set(
+    allExcludedRepos.map((name) => name.toLowerCase()),
+  );
 
-  // populate repoToHide map for quick lookup while filtering out
-  allExcludedRepos.forEach((repoName) => {
-    repoToHide[repoName] = true;
-  });
+  const primaryRepoNodes = (
+    res.data.data.user?.repositories.nodes ?? []
+  ).filter((node): node is TopLanguagesRepositoryFragment => node !== null);
+
+  const extraOwners = resolveRepoOwners(
+    repo_owners,
+    getConfig().defaultRepoOwners,
+    username,
+  );
+  let allRepoNodes: Array<TopLanguagesRepositoryFragment> = primaryRepoNodes;
+  if (extraOwners.length > 0) {
+    const extraOwnerRepos = await Promise.all(
+      extraOwners.map((extraOwner) =>
+        fetchOwnerTopLanguagesRepos(extraOwner, affiliations, pat),
+      ),
+    );
+    allRepoNodes = deduplicateRepoNodes([
+      ...primaryRepoNodes,
+      ...extraOwnerRepos.flat(),
+    ]);
+  }
 
   // filter out repositories to be hidden
-  const repoNodes = (res.data.data.user?.repositories.nodes ?? []).filter(
-    (node): node is TopLanguagesRepositoryFragment =>
-      !!node && !repoToHide[node.name],
+  const repoNodes = allRepoNodes.filter(
+    (node) => !isRepoExcluded(node, repoToHide, repoToHideLower),
   );
 
   // flatten edges across repos. Order matters: `concat(acc)` prepends, and the

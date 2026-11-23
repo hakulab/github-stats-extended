@@ -31,10 +31,13 @@ export default async (
     hide_progress,
     hide_values,
     stats_format,
+    repo_owners,
+    "repo-owners": repoOwnersAlias,
     ...remainingParams
   },
   pat = null,
 ) => {
+  const rawRepoOwners = repo_owners ?? repoOwnersAlias;
   const colorParams = pickColorParams(remainingParams);
 
   const invalidColorInput = findInvalidColorParam(colorParams);
@@ -61,12 +64,15 @@ export default async (
   }
 
   const safePattern = /^[-\w/.,]+$/;
-  if (username && !safePattern.test(username)) {
+  if (
+    (username && !safePattern.test(username)) ||
+    (rawRepoOwners && !safePattern.test(rawRepoOwners))
+  ) {
     return {
       status: "error - permanent",
       content: renderError({
         message: "Something went wrong",
-        secondaryMessage: "Username contains unsafe characters",
+        secondaryMessage: "Username or owner contains unsafe characters",
         renderOptions: colorParams,
       }),
     };
@@ -108,6 +114,7 @@ export default async (
       count_weight,
       parseArray(role),
       pat,
+      rawRepoOwners === undefined ? undefined : parseArray(rawRepoOwners),
     );
 
     return {

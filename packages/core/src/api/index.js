@@ -37,10 +37,13 @@ export default async (
     rank_icon,
     show,
     contribs_include_own_repos,
+    repo_owners,
+    "repo-owners": repoOwnersAlias,
     ...remainingParams
   },
   pat = null,
 ) => {
+  const rawRepoOwners = repo_owners ?? repoOwnersAlias;
   const colorParams = pickColorParams(remainingParams);
 
   const invalidColorInput = findInvalidColorParam(colorParams);
@@ -69,7 +72,8 @@ export default async (
   if (
     (username && !safePattern.test(username)) ||
     (repo && !safePattern.test(repo)) ||
-    (owner && !safePattern.test(owner))
+    (owner && !safePattern.test(owner)) ||
+    (rawRepoOwners && !safePattern.test(rawRepoOwners))
   ) {
     return {
       status: "error - permanent",
@@ -125,6 +129,7 @@ export default async (
       showStats.includes("all_time_contribs"),
       parseBoolean(contribs_include_own_repos),
       pat,
+      rawRepoOwners === undefined ? undefined : parseArray(rawRepoOwners),
     );
 
     return {
