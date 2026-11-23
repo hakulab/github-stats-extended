@@ -75,11 +75,11 @@ describe("Cloudflare Workers fetch adapter", () => {
     });
 
     const request = new Request(
-      "https://github-stats.hakula.xyz/api?username=hakula139&theme=dark",
+      "https://stats.example.com/api?username=alice&theme=dark",
     );
     const response = await worker.fetch(request, {
       PAT_1: "ghp_test_token",
-      WHITELIST: "hakula139",
+      WHITELIST: "alice",
       CACHE_SECONDS: "3600",
       NON_STRING_BINDING: { ignored: true },
     });
@@ -87,11 +87,11 @@ describe("Cloudflare Workers fetch adapter", () => {
     expect(axios.defaults.adapter).toBe("fetch");
     expect(loadConfigFromEnvMock).toHaveBeenCalledWith({
       PAT_1: "ghp_test_token",
-      WHITELIST: "hakula139",
+      WHITELIST: "alice",
       CACHE_SECONDS: "3600",
     });
     expect(apiMock).toHaveBeenCalledWith(
-      { username: "hakula139", theme: "dark" },
+      { username: "alice", theme: "dark" },
       null,
     );
     expect(response.status).toBe(200);
@@ -109,13 +109,13 @@ describe("Cloudflare Workers fetch adapter", () => {
     });
 
     await handleWorkerRequest(
-      new Request("https://github-stats.hakula.xyz/api?username=hakula139"),
+      new Request("https://stats.example.com/api?username=alice"),
       { CACHE_SECONDS: "120" },
     );
     expect(process.env.CACHE_SECONDS).toBe("120");
 
     const response = await handleWorkerRequest(
-      new Request("https://github-stats.hakula.xyz/api?username=hakula139"),
+      new Request("https://stats.example.com/api?username=alice"),
       {},
     );
     expect(process.env.CACHE_SECONDS).toBeUndefined();
@@ -129,13 +129,11 @@ describe("Cloudflare Workers fetch adapter", () => {
     });
 
     const response = await worker.fetch(
-      new Request(
-        "https://github-stats.hakula.xyz/api/top-langs/?username=hakula139",
-      ),
+      new Request("https://stats.example.com/api/top-langs/?username=alice"),
       {},
     );
 
-    expect(topLangsMock).toHaveBeenCalledWith({ username: "hakula139" }, null);
+    expect(topLangsMock).toHaveBeenCalledWith({ username: "alice" }, null);
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("image/svg+xml");
     expect(await response.text()).toBe("<svg>top-langs</svg>");
@@ -153,25 +151,21 @@ describe("Cloudflare Workers fetch adapter", () => {
     });
 
     const pinRes = await worker.fetch(
-      new Request(
-        "https://github-stats.hakula.xyz/api/pin?username=hakula139&repo=demo",
-      ),
+      new Request("https://stats.example.com/api/pin?username=alice&repo=demo"),
       {},
     );
     expect(pinRes.status).toBe(200);
     expect(await pinRes.text()).toBe("<svg>pin</svg>");
 
     const gistRes = await worker.fetch(
-      new Request("https://github-stats.hakula.xyz/api/gist?id=abc123"),
+      new Request("https://stats.example.com/api/gist?id=abc123"),
       {},
     );
     expect(gistRes.status).toBe(200);
     expect(await gistRes.text()).toBe("<svg>gist</svg>");
 
     const wakaRes = await worker.fetch(
-      new Request(
-        "https://github-stats.hakula.xyz/api/wakatime?username=hakula139",
-      ),
+      new Request("https://stats.example.com/api/wakatime?username=alice"),
       {},
     );
     expect(wakaRes.status).toBe(200);
@@ -180,7 +174,7 @@ describe("Cloudflare Workers fetch adapter", () => {
 
   it("serializes JSON objects sent via res.send", async () => {
     const response = await worker.fetch(
-      new Request("https://github-stats.hakula.xyz/api/repeat-recent", {
+      new Request("https://stats.example.com/api/repeat-recent", {
         method: "GET",
       }),
       {},
@@ -193,7 +187,7 @@ describe("Cloudflare Workers fetch adapter", () => {
 
   it("returns 404 for unknown routes", async () => {
     const response = await worker.fetch(
-      new Request("https://github-stats.hakula.xyz/unknown"),
+      new Request("https://stats.example.com/unknown"),
       {},
     );
 
